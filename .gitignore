@@ -1,0 +1,28 @@
+DatosDistancias/
+data/
+*.csv
+*.xlsx
+
+# LaTeX
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+
+# Jupyter
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
+Thumbs.db

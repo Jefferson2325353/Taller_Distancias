@@ -1,0 +1,237 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[spanish, es-nodecimaldot]{babel}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb, amsthm, amsbsy, mathtools}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\graphicspath{{./}{figuras/}}
+
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{csquotes}
+\usepackage{physics}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{array}
+\geometry{margin=2.5cm}
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+\sisetup{round-mode=places, round-precision=2, detect-weight=true, detect-family=true}
+
+% ====== METADATOS (EDITAR) ======
+\newcommand{\Curso}{Métodos Matemáticos para la Física I}
+\newcommand{\Autor}{Nombre Apellido}
+\newcommand{\Codigo}{Código}
+\newcommand{\Fecha}{\today}
+
+% ====== VALORES (EDITAR SI ES NECESARIO) ======
+\newcommand{\PMcol}{PM2.5}     % nombre exacto de la columna en el Excel
+\newcommand{\Wopt}{180}        % minutos
+\newcommand{\DistMin}{497.44}
+\newcommand{\AlphaGlobal}{0.5938}
+\newcommand{\MAEglobal}{3.05}
+\newcommand{\RMSEglobal}{3.83}
+\newcommand{\AlphaTrain}{0.6352}
+\newcommand{\MAEtrain}{3.49}
+\newcommand{\RMSEtrain}{4.31}
+\newcommand{\MAEtest}{2.68}
+\newcommand{\RMSEtest}{3.45}
+\newcommand{\TolAbs}{5}        % µg/m^3
+\newcommand{\PctOK}{81.8}
+\newcommand{\XvalidMin}{0.03}
+\newcommand{\XvalidMax}{40.39}
+
+% ====== RUTAS DE FIGURAS (COLOCAR ARCHIVOS EN LA MISMA CARPETA QUE ESTE .TEX) ======
+\newcommand{\FigSerie}{serie_win180.png}
+\newcommand{\FigCalib}{calibracion_win180.png}
+% (Opcional) si generas la curva d(W) vs W:
+\newcommand{\FigVentanaDist}{ventana_vs_distancia.png}
+% (Opcional) residuos en el tiempo y histograma:
+\newcommand{\FigResiduos}{residuos_tiempo.png}
+\newcommand{\FigHistRes}{hist_residuos.png}
+
+\title{\textbf{Taller de Distancias y Calibración Lineal de Sensores de PM\textsubscript{2.5}}\\
+\large \Curso}
+\author{\Autor\ (\Codigo)}
+\date{\Fecha}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este informe documenta un protocolo cuantitativo, reproducible y trazable para comparar y calibrar
+lecturas de un sensor de bajo costo de material particulado fino (\textsc{pm}\textsubscript{2.5}) respecto de una estación de referencia (patrón).
+El procedimiento sigue los lineamientos del \emph{Taller de Distancias}: (i) armonización temporal y construcción de promedios móviles sobre ventanas comunes, (ii) selección del ancho de ventana mediante la minimización de la distancia euclidiana entre series suavizadas, (iii) calibración lineal sin intercepto $f \approx \alpha\,\hat f$, (iv) validación temporal fuera de muestra, y (v) delimitación del alcance de validez bajo una tolerancia especificada.
+Aplicado al conjunto de datos suministrado, se obtiene una ventana óptima de \SI{\Wopt}{\minute}, distancia mínima $d(W^\*)=\num{\DistMin}$ y un factor de calibración global $\alpha=\num{\AlphaGlobal}$. El desempeño agregado es $\mathrm{MAE}=\num{\MAEglobal}$ y $\mathrm{RMSE}=\num{\RMSEglobal}$; en validación mitad/mitad, $\alpha_{\text{train}}=\num{\AlphaTrain}$ con $\mathrm{MAE}_{\text{test}}=\num{\MAEtest}$ y $\mathrm{RMSE}_{\text{test}}=\num{\RMSEtest}$. Con tolerancia absoluta $\tau=\SI{\TolAbs}{\micro\gram\per\meter\cubed}$, el \num{\PctOK}\% de los puntos queda dentro de tolerancia y el rango operativo del sensor (suavizado) donde la calibración es confiable es $[\num{\XvalidMin}, \num{\XvalidMax}]$~\si{\micro\gram\per\meter\cubed}.
+\end{abstract}
+
+\section{Introducción y motivación}
+La proliferación de sensores de bajo costo ha democratizado el monitoreo de calidad del aire; sin embargo, sus lecturas suelen exhibir ruido, sesgos sistemáticos, deriva y sensibilidad a variables ambientales.
+Una \emph{calibración} frente a una estación de referencia es indispensable para convertir lecturas brutas en estimaciones útiles para análisis científico.
+Este trabajo implementa un flujo \emph{end-to-end} de limpieza, alineación, suavizado, comparación, calibración, validación y reporte, con énfasis en reproducibilidad y trazabilidad, en el espíritu de la asignatura \Curso.
+
+\section{Datos, supuestos y preprocesamiento}
+\subsection{Descripción de los datos}
+\begin{itemize}[leftmargin=1.2em]
+  \item \textbf{Patrón (referencia):} columna \texttt{\PMcol} del archivo \texttt{Datos Estaciones AMB.xlsx}. La columna temporal presenta variantes (\texttt{Date\&Time}, \texttt{Fecha y Hora}, etc.).
+  \item \textbf{Sensor (IoT):} colección de archivos \texttt{mediciones\_*.csv}, potencialmente con separadores y codificaciones heterogéneas.
+\end{itemize}
+
+\subsection{Normalización temporal y de tipo}
+Para prevenir errores de fusión por zona horaria (\verb|datetime64[ns]| vs \verb|datetime64[ns,UTC]|), toda marca temporal $t$ se normaliza a \textbf{UTC naive} mediante el mapeo
+\begin{equation}
+t \mapsto \mathrm{NaiveUTC}(t) := \mathrm{tz\mbox{-}drop}\big(\mathrm{toUTC}(t)\big).
+\end{equation}
+Se convierten todas las magnitudes a tipo numérico, coercionando cadenas y descartando filas sin fecha o valor válidos.
+
+\subsection{Grilla temporal común y suavizado}
+Sea $\Delta t$ la mediana del paso del patrón; se remuestrean patrón y sensor por mediana (robusto a atípicos) sobre la grilla $t_k=t_0+k\,\Delta t$. Para cada $W$ (minutos) se define el \emph{promedio móvil centrado}:
+\begin{equation}
+\overline{f}_k(W)=\frac{1}{m(W)}\sum_{j\in \mathcal{W}_k(W)} f_j,\qquad
+\overline{\hat f}_k(W)=\frac{1}{m(W)}\sum_{j\in \mathcal{W}_k(W)} \hat f_j,
+\end{equation}
+donde $\mathcal{W}_k(W)$ es la ventana centrada en $t_k$ e $m(W)$ el número de puntos en la ventana.
+El centrado reduce desfases; $W$ controla el compromiso \emph{sesgo--varianza}.
+
+\subsection{Emparejamiento temporal}
+Se aplica una unión \emph{nearest} con tolerancia $\delta$ (típicamente 10--20~min) para obtener pares coetáneos $(\overline{\hat f}_i(W), \overline{f}_i(W))$. Esto preserva estructura temporal con pequeños desajustes.
+
+\section{Selección de ventana por distancia euclidiana}
+Para cada $W$ se evalúa
+\begin{equation}
+d(W)=\norm{\overline{\mathbf{f}}(W)-\overline{\hat{\mathbf{f}}}(W)}_2
+=\sqrt{\sum_{i=1}^{n(W)} \big(\,\overline{f}_i(W)-\overline{\hat f}_i(W)\,\big)^2}.
+\end{equation}
+Se define $W^\*=\arg\min_W d(W)$. En los datos analizados: $W^\*=\SI{\Wopt}{\minute}$ con $d(W^\*)=\num{\DistMin}$. La Figura~\ref{fig:serie} ilustra la superposición suavizada en $W^\*$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\FigSerie}
+\caption{Series suavizadas (patrón vs.\ sensor) con $W^\*=\SI{\Wopt}{\minute}$ y distancia mínima $d(W^\*)=\num{\DistMin}$.}
+\label{fig:serie}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\textwidth]{\FigVentanaDist}
+\caption{Curva $d(W)$ vs.\ $W$; la línea punteada marca $W^\*$.}
+\label{fig:ventana}
+\end{figure}
+
+\section{Calibración lineal sin intercepto}
+Se plantea $f \approx \alpha\,\hat f$ sin término independiente. Derivando la solución de mínimos cuadrados por el origen:
+\begin{align}
+\alpha^\* &= \arg\min_{\alpha}\, \sum_{i} \big(f_i - \alpha\,\hat f_i\big)^2
+= \arg\min_{\alpha}\, \left( \sum_i f_i^2 - 2\alpha\sum_i f_i \hat f_i + \alpha^2\sum_i \hat f_i^2 \right),\\
+\frac{d}{d\alpha}(\cdot)&=0 \;\Rightarrow\; -2\sum_i f_i\hat f_i + 2\alpha\sum_i \hat f_i^2 = 0
+\;\Rightarrow\; \boxed{\;\alpha=\dfrac{\sum_i f_i\hat f_i}{\sum_i \hat f_i^2}\;}. \label{eq:alpha}
+\end{align}
+En nuestro caso, $\alpha_{\text{global}}=\num{\AlphaGlobal}$. La Figura~\ref{fig:calib} muestra la nube $(\overline{\hat f},\overline{f})$ y la recta $y=\alpha x$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.58\textwidth]{\FigCalib}
+\caption{Dispersión $(\hat f, f)$ y recta $y=\alpha x$ con $\alpha=\num{\AlphaGlobal}$; MAE=\num{\MAEglobal}, RMSE=\num{\RMSEglobal}.}
+\label{fig:calib}
+\end{figure}
+
+\subsection{Métricas de error}
+Sea $e_i=f_i-\alpha\,\hat f_i$. Reportamos
+\begin{equation}
+\mathrm{MAE}=\frac{1}{n}\sum_i |e_i|,\qquad
+\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_i e_i^2}.
+\end{equation}
+Con $\alpha$ global: $\mathrm{MAE}=\num{\MAEglobal}$ y $\mathrm{RMSE}=\num{\RMSEglobal}$, todo en \si{\micro\gram\per\meter\cubed}.
+
+\section{Validación temporal (fuera de muestra)}
+Se divide cronológicamente el conjunto en dos mitades: entrenamos $\alpha_{\text{train}}$ en la primera y evaluamos en la segunda. Se obtienen:
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+ & MAE & RMSE & Observaciones \\
+\midrule
+Global ($\alpha=\num{\AlphaGlobal}$) & \num{\MAEglobal} & \num{\RMSEglobal} & todas las fechas \\
+Train ($\alpha_{\text{train}}=\num{\AlphaTrain}$) & \num{\MAEtrain} & \num{\RMSEtrain} & estima $\alpha$ \\
+Test (con $\alpha_{\text{train}}$) & \num{\MAEtest} & \num{\RMSEtest} & generalización temporal \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{\FigResiduos}
+\caption{Residuos en el tiempo $e(t)=f(t)-\alpha \hat f(t)$.}
+\label{fig:residuos}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.55\textwidth]{\FigHistRes}
+\caption{Histograma de residuos.}
+\label{fig:histres}
+\end{figure}
+
+\section{Alcance de validez y tolerancias}
+Con tolerancia absoluta $\tau=\SI{\TolAbs}{\micro\gram\per\meter\cubed}$, el \num{\PctOK}\% de los pares cumple $|e_i|\le \tau$.
+Definimos el \emph{rango operativo} del sensor (suavizado) como
+\begin{equation}
+\big[\hat f_{\min}^{(\tau)},\, \hat f_{\max}^{(\tau)}\big]
+= \text{mín./máx.\ de }\overline{\hat f}_i \text{ tales que } |e_i|\le\tau.
+\end{equation}
+En nuestro caso: $[\num{\XvalidMin},\,\num{\XvalidMax}]$~\si{\micro\gram\per\meter\cubed}. Si se desea una tolerancia relativa (porcentaje), reemplazar la condición por $|e_i|\le \rho\,|f_i|$.
+
+\section{Análisis de sensibilidad y consideraciones prácticas}
+\begin{itemize}[leftmargin=1.2em]
+\item \textbf{Elección de $W$:} $W$ pequeño reduce sesgo y aumenta varianza; $W$ grande reduce varianza y aumenta sesgo (desfase/atenuación de picos). El óptimo hallado sugiere estructura de variabilidad de escala horaria (3~h).
+\item \textbf{Estabilidad de $\alpha$:} comparar $\alpha$ global vs.\ $\alpha_{\text{train}}$ informa sobre deriva estacional o dependencia de humedad/temperatura.
+\item \textbf{Grilla y tolerancia temporal:} una tolerancia de emparejamiento demasiado estricta elimina pares; demasiado laxa mezcla episodios disímiles.
+\item \textbf{Robustez:} la mediana en el remuestreo mitiga atípicos frente a la media; se sugiere evaluar también Huber/biweight si hay outliers persistentes.
+\end{itemize}
+
+\section{Conclusiones}
+El protocolo implementado provee una \textbf{calibración lineal simple y operacional} del sensor respecto del patrón, con una ventana óptima $W^\*=\SI{\Wopt}{\minute}$ que minimiza la discrepancia suavizada y un factor $\alpha=\num{\AlphaGlobal}$ aplicable en el rango operativo estimado. La validación temporal muestra consistencia en MAE/RMSE, lo que respalda el uso de $\alpha$ en periodos similares. Este flujo es reproducible e integrable en pipelines de monitoreo.
+
+\section*{Reproducibilidad}
+El notebook \texttt{TallerDistancias.ipynb} automatiza: carga (Excel/CSV), normalización temporal a UTC naive, remuestreo, ventana--distancia, ajuste de $\alpha$, validación, tolerancia y exportes (\texttt{figuras/}, \texttt{resultados/}). Este informe se compila con \LaTeX; basta colocar \texttt{\FigSerie} y \texttt{\FigCalib} en la misma carpeta.
+
+\appendix
+\section{Pseudocódigo del pipeline}
+\begin{enumerate}[leftmargin=1.2em, label=\textbf{Paso \arabic*.}]
+\item \textbf{Cargar patrón y sensor} (auto-detección de columnas de tiempo/valor).
+\item \textbf{Normalizar tiempo} $\to$ UTC naive (ambas fuentes).
+\item \textbf{Remuestrear} por mediana en grilla común $\Delta t = \mathrm{mediana}(\Delta t_{\text{patrón}})$.
+\item Para cada $W$ en $\{15,30,60,120,180\}$~min:
+  \begin{enumerate}
+    \item Calcular promedios móviles centrados de patrón y sensor.
+    \item Emparejar por tiempo (nearest, tolerancia $\delta$).
+    \item Calcular $d(W)$.
+  \end{enumerate}
+\item Seleccionar $W^\*=\arg\min_W d(W)$.
+\item Con $W^\*$: estimar $\alpha$ con \eqref{eq:alpha}; computar MAE/RMSE.
+\item Validar mitad/mitad: $\alpha_{\text{train}}$ en la primera mitad; MAE/RMSE en la segunda.
+\item Alcance de validez: porcentaje dentro de tolerancia y rango operativo.
+\end{enumerate}
+
+\section{Tabla de símbolos}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Símbolo & Descripción \\
+\midrule
+$f$ & serie del patrón (referencia) \\
+$\hat f$ & serie del sensor (bajo costo) \\
+$W$ & ancho de ventana (minutos) \\
+$d(W)$ & distancia euclidiana entre series suavizadas \\
+$\alpha$ & factor de calibración (sin intercepto) \\
+$e$ & residuo $f-\alpha\hat f$ \\
+$\tau$ & tolerancia (absoluta o relativa) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
